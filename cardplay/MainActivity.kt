@@ -1,9 +1,12 @@
 package com.example.cardplay
 
 import android.os.Bundle
+import kotlinx.coroutines.delay
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -11,6 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,10 +27,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.cardplay.model.*
 import com.example.cardplay.ui.WeatherViewModel
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,24 +54,87 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// 定义导航路由
+sealed class Screen(val route: String) {
+    object WeatherHome : Screen("weather_home")
+    object CitySelection : Screen("city_selection")
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeatherApp(
-    viewModel: WeatherViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: WeatherViewModel = viewModel(),
+    navController: NavHostController = rememberNavController()
+) {
+    NavHost(
+        navController = navController,
+        startDestination = Screen.WeatherHome.route
+    ) {
+        // 天气主页
+        composable(Screen.WeatherHome.route) {
+            WeatherHomeScreen(viewModel, navController)
+        }
+        // 城市选择页
+        composable(Screen.CitySelection.route) {
+            CitySelectionScreen(viewModel, navController)
+        }
+    }
+}
+
+@Composable
+fun WeatherHomeScreen(
+    viewModel: WeatherViewModel,
+    navController: NavHostController
 ) {
     val weatherData by viewModel.weatherData.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val error by viewModel.error.collectAsState()
-
-    // 自动加载北京天气数据
-    LaunchedEffect(Unit) {
-        viewModel.fetchWeather("北京")
-    }
+    val currentCity by viewModel.currentCity.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // 顶部栏：城市显示与切换按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 当前城市显示
+            Column {
+                Text(
+                    text = "当前城市",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = currentCity,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            // 切换城市按钮
+            Button(
+                onClick = { navController.navigate(Screen.CitySelection.route) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = "选择城市",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("切换城市")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // 错误提示
         error?.let { errorMessage ->
             AlertDialog(
@@ -82,72 +159,237 @@ fun WeatherApp(
         } else {
             weatherData?.let { data ->
                 WeatherContent(data)
+            } ?: run {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("暂无天气数据")
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WeatherContent(weatherData: com.example.cardplay.model.WeatherResponse) {
-    val realtime = weatherData.result.realtime
-    val future = weatherData.result.future
+fun CitySelectionScreen(
+    viewModel: WeatherViewModel,
+    navController: NavHostController
+) {
+    var cityInput by remember { mutableStateOf("") }
+    val popularCities by viewModel.popularCities.collectAsState()
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("选择城市") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            // 普通输入框
+            OutlinedTextField(
+                value = cityInput,
+                onValueChange = { cityInput = it },
+                label = { Text("请输入城市名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text
+                ),
+                visualTransformation = VisualTransformation.None
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 按钮行
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 确认按钮
+                Button(
+                    onClick = {
+                        if (cityInput.isNotBlank()) {
+                            viewModel.addCityToPopular(cityInput)
+                            cityInput = ""
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = cityInput.isNotBlank()
+                ) {
+                    Text("添加到列表")
+                }
+
+                // 删除按钮
+                Button(
+                    onClick = {
+                        viewModel.removeLastPopularCity()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Red.copy(alpha = 0.8f)
+                    ),
+                    enabled = popularCities.isNotEmpty()
+                ) {
+                    Text("删除一个")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 热门城市列表
+            Text(
+                text = "热门城市",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyColumn {
+                items(popularCities) { city ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        onClick = {
+                            viewModel.updateCity(city)
+                            navController.popBackStack()
+                        }
+                    ) {
+                        Text(
+                            text = city,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun WeatherContent(weatherData: WeatherResponse) {
+    val result = weatherData.result
+    val realtime = result.realtime
+    val future = result.future
+
+    // 控制动画显示的状态
+    var isCardVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(weatherData) {
+        // 每次数据更新时重新播放动画
+        isCardVisible = false
+        delay(50)
+        isCardVisible = true
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // 第一部分：当前天气（占屏幕2/6）
-        Box(
-            contentAlignment = Alignment.Center,
+        // 第一部分：当前天气（带动画效果）
+        AnimatedVisibility(
+            visible = isCardVisible,
+            enter = fadeIn(animationSpec = tween(durationMillis = 1000)) +
+                    scaleIn(animationSpec = tween(
+                        durationMillis = 800,
+                        easing = FastOutSlowInEasing
+                    ), initialScale = 0.8f),
+            exit = fadeOut() + scaleOut(),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(2f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(getWeatherColor(realtime.info))
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(getWeatherColor(realtime.info))
             ) {
-                // 根据天气类型显示不同图标
-                Image(
-                    painter = painterResource(getWeatherIcon(realtime.info)),
-                    contentDescription = "天气图标",
-                    modifier = Modifier.size(80.dp),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "${realtime.temperature}°C",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = realtime.info,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = weatherData.result.city,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.8f)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                // 显示更多实时信息
-                Text(
-                    text = "湿度: ${realtime.humidity}% | 风力: ${realtime.power}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.8f)
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Image(
+                        painter = painterResource(getWeatherIcon(realtime.info)),
+                        contentDescription = "天气图标",
+                        modifier = Modifier.size(80.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 添加切换动画状态
+                    var showTemperature by remember { mutableStateOf(true) }
+
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            delay(1000) // 等待1秒
+                            showTemperature = !showTemperature // 切换显示状态
+                        }
+                    }
+
+                    // 温度显示（大字）
+                    AnimatedVisibility(
+                        visible = showTemperature,
+                        enter = fadeIn(animationSpec = tween(1000)),
+                        exit = fadeOut(animationSpec = tween(1000))
+                    ) {
+                        Text(
+                            text = "${realtime.temperature}°C",
+                            style = MaterialTheme.typography.displayLarge, // 使用更大的字体
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.animateContentSize() // 平滑的尺寸变化
+                        )
+                    }
+
+                    // 天气描述显示（大字）
+                    AnimatedVisibility(
+                        visible = !showTemperature,
+                        enter = fadeIn(animationSpec = tween(1000)),
+                        exit = fadeOut(animationSpec = tween(1000))
+                    ) {
+                        Text(
+                            text = realtime.info,
+                            style = MaterialTheme.typography.displayLarge, // 使用更大的字体
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.animateContentSize()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = result.city,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "湿度: ${realtime.humidity}% | 风力: ${realtime.power}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 第二部分：未来几天预报（左右滑动，占屏幕1/6）
+        // 第二部分：未来几天预报
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -171,7 +413,7 @@ fun WeatherContent(weatherData: com.example.cardplay.model.WeatherResponse) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 第三部分：详细天气预报（上下滑动，占屏幕3/6）
+        // 第三部分：详细天气预报
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -196,7 +438,7 @@ fun WeatherContent(weatherData: com.example.cardplay.model.WeatherResponse) {
 }
 
 @Composable
-fun FutureWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
+fun FutureWeatherCard(dayWeather: FutureWeather) {
     Card(
         modifier = Modifier
             .width(120.dp)
@@ -210,7 +452,6 @@ fun FutureWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // 显示日期（简化的格式，如"10/25"）
             val dateParts = dayWeather.date.split("-")
             val simpleDate = if (dateParts.size >= 3) "${dateParts[1]}/${dateParts[2]}" else dayWeather.date
             Text(
@@ -219,7 +460,6 @@ fun FutureWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // 天气图标
             Image(
                 painter = painterResource(getWeatherIcon(dayWeather.weather)),
                 contentDescription = dayWeather.weather,
@@ -237,7 +477,7 @@ fun FutureWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
 }
 
 @Composable
-fun DetailedWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
+fun DetailedWeatherCard(dayWeather: FutureWeather) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -326,24 +566,24 @@ fun DetailedWeatherCard(dayWeather: com.example.cardplay.model.FutureWeather) {
 // 根据天气类型获取图标
 fun getWeatherIcon(weatherInfo: String): Int {
     return when {
-        weatherInfo.contains("晴") -> R.drawable.qing  // 需要添加晴天图片
-        weatherInfo.contains("多云") -> R.drawable.duoyun  // 需要添加多云图片
-        weatherInfo.contains("阴") -> R.drawable.yin  // 需要添加阴天图片
-        weatherInfo.contains("雨") -> R.drawable.yu  // 需要添加下雨图片
-        weatherInfo.contains("雪") -> R.drawable.xue  // 使用现有的雪图片
-        else -> R.drawable.xue  // 默认图片
+        weatherInfo.contains("晴") -> R.drawable.qing
+        weatherInfo.contains("多云") -> R.drawable.duoyun
+        weatherInfo.contains("阴") -> R.drawable.yin
+        weatherInfo.contains("雨") -> R.drawable.yu
+        weatherInfo.contains("雪") -> R.drawable.xue
+        else -> R.drawable.xue
     }
 }
 
 // 根据天气类型获取背景色
 fun getWeatherColor(weatherInfo: String): Color {
     return when {
-        weatherInfo.contains("晴") -> Color(0xFFFFD700)  // 金色
-        weatherInfo.contains("多云") -> Color(0xFF87CEEB)  // 天蓝色
-        weatherInfo.contains("阴") -> Color(0xFF778899)  // 石板灰
-        weatherInfo.contains("雨") -> Color(0xFF4682B4)  // 钢蓝色
-        weatherInfo.contains("雪") -> Color(0xFFF0F8FF)  // 爱丽丝蓝
-        else -> Color(0xFF2196F3)  // 默认蓝色
+        weatherInfo.contains("晴") -> Color(0xFFFFD700)
+        weatherInfo.contains("多云") -> Color(0xFF87CEEB)
+        weatherInfo.contains("阴") -> Color(0xFF778899)
+        weatherInfo.contains("雨") -> Color(0xFF4682B4)
+        weatherInfo.contains("雪") -> Color(0xFFF0F8FF)
+        else -> Color(0xFF2196F3)
     }
 }
 
@@ -351,14 +591,13 @@ fun getWeatherColor(weatherInfo: String): Color {
 @Composable
 fun WeatherAppPreview() {
     MaterialTheme {
-        // 为了预览，创建一个模拟的WeatherResponse
         WeatherContent(
-            com.example.cardplay.model.WeatherResponse(
+            WeatherResponse(
                 reason = "success",
                 errorCode = 0,
-                result = com.example.cardplay.model.WeatherResult(
+                result = WeatherResult(
                     city = "北京",
-                    realtime = com.example.cardplay.model.RealtimeWeather(
+                    realtime = RealtimeWeather(
                         temperature = "25",
                         humidity = "60",
                         info = "晴",
@@ -368,18 +607,18 @@ fun WeatherAppPreview() {
                         aqi = "45"
                     ),
                     future = listOf(
-                        com.example.cardplay.model.FutureWeather(
+                        FutureWeather(
                             date = "2024-10-25",
                             temperature = "18/25℃",
                             weather = "晴",
-                            wid = com.example.cardplay.model.Wid("00", "00"),
+                            wid = Wid("00", "00"),
                             direct = "北风"
                         ),
-                        com.example.cardplay.model.FutureWeather(
+                        FutureWeather(
                             date = "2024-10-26",
                             temperature = "17/24℃",
                             weather = "多云",
-                            wid = com.example.cardplay.model.Wid("01", "01"),
+                            wid = Wid("01", "01"),
                             direct = "东北风"
                         )
                     )
